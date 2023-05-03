@@ -15,6 +15,12 @@
 pip install --user dist/docs_updater-0.1.0-py3-none-any.whl
 ```
 
+必要な環境変数
+
+- `OPENAI_API_KEY`: APIキー
+- `OPENAI_API_BASE`: APIのURL (e.g. https://$RESOURCE_NAME.openai.azure.com (azure), https://api.openai.com/v1 (openai))
+- `OPENAI_API_VERSION`: APIのバージョン (e.g. 2023-03-15-preview). GPT-4を使う場合のみ必要.
+
 ### Update documents
 
 ```bash
@@ -23,7 +29,7 @@ dupdate [OPTIONS]
 
 Options
 
-- `--repo`: リポジトリへのパス. 指定しない場合はカレントディレクトリになる　.
+- `--repo`: リポジトリへのパス. 指定しない場合はカレントディレクトリになる.
 - `--docs-dir`: リポジトリ内でのドキュメントディレクトリのパス. デフォルトは `docs`.
 - `--api-type`: 使うAPIのタイプ. `openai` (default) と `azure` を指定可能.
-- `--model-name`: 使うGPTのバージョン. デフォルトは `gpt-3.5-turbo`
+- `--model-name`: 使うGPTのバージョン. デフォルトは `gpt-3.5-turbo`.
