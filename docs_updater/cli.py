@@ -2,7 +2,7 @@ import click
 from colored import fg, attr
 import difflib
 import json
-from langchain.chat_models import AzureChatOpenAI
+from langchain.chat_models import AzureChatOpenAI, ChatOpenAI
 from langchain.schema import HumanMessage
 import os
 from pathlib import Path
@@ -128,9 +128,12 @@ def main(
 
     click.echo(f"Ditected documents: {list(docs_dict.keys())}")
 
-    model = AzureChatOpenAI(deployment_name=model_name, temperature=0)
-    files = choose_updatable_docs(model, docs_dict, diff)
+    if api_type == "azure":
+        model = AzureChatOpenAI(deployment_name=model_name, temperature=0)
+    else:
+        model = ChatOpenAI(temperature=0)
 
+    files = choose_updatable_docs(model, docs_dict, diff)
     click.echo(f"Files to update: {files}")
 
     # Update each file in the list
