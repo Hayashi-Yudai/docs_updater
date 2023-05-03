@@ -2,7 +2,7 @@
 name = "docs-updater"
 version = "0.1.0"
 description = "Update document from git diff powered by ChatGPT"
-authors = ["Yudai Hayashi <yudai@wantedly.com>"]
+authors = ["Yudai Hayashi <yudai0913haya@gmail.com>"]
 license = "MIT"
 readme = "README.md"
 packages = [{include = "docs_updater"}]
