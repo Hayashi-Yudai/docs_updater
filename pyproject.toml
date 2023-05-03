@@ -9,9 +9,10 @@ packages = [{include = "docs_updater"}]
 
 [tool.poetry.dependencies]
 python = ">=3.9,<3.12"
+click = "^8.1.3"
 
 [tool.poetry.scripts]
-my-tool = "docs_updater.cli:main"
+dupdate = "docs_updater.cli:main"
 
 [build-system]
 requires = ["poetry-core"]
