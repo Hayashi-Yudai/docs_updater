@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "docs-updater"
+version = "0.1.0"
+description = "Update document from git diff powered by ChatGPT"
+authors = ["Yudai Hayashi <yudai@wantedly.com>"]
+license = "MIT"
+readme = "README.md"
+packages = [{include = "docs_updater"}]
+
+[tool.poetry.dependencies]
+python = ">=3.9,<3.12"
+
+[tool.poetry.scripts]
+my-tool = "docs_updater.cli:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
