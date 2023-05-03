@@ -1,4 +1,6 @@
 import click
+from colored import fg, attr
+import difflib
 import json
 from langchain.chat_models import AzureChatOpenAI
 from langchain.schema import HumanMessage
@@ -7,7 +9,11 @@ from pathlib import Path
 import subprocess
 from typing import Optional
 
-from docs_updater.prompts import create_context_prompt, create_filelist_prompt
+from docs_updater.prompts import (
+    create_context_prompt,
+    create_filelist_prompt,
+    create_update_prompt,
+)
 
 
 def env_validate(api_type: str):
@@ -69,6 +75,24 @@ def choose_updatable_docs(
     return json.loads(file_list_json_str)
 
 
+def print_colored_diff(current_doc: str, updated_doc: str):
+    diff = difflib.unified_diff(
+        current_doc.splitlines(),
+        updated_doc.splitlines(),
+        fromfile="Current Document",
+        tofile="Updated Document",
+        lineterm="",
+    )
+
+    for line in diff:
+        if line.startswith("+"):
+            print(f"{fg(2)}{line}{attr(0)}")
+        elif line.startswith("-"):
+            print(f"{fg(1)}{line}{attr(0)}")
+        else:
+            print(line)
+
+
 @click.command()
 @click.option("--repo", default=None, help="The path to the repository.")
 @click.option(
@@ -108,6 +132,28 @@ def main(
     files = choose_updatable_docs(model, docs_dict, diff)
 
     click.echo(f"Files to update: {files}")
+
+    # Update each file in the list
+    for file in files["files"]:
+        with open(repo / docs_dir / file, "r") as f:
+            current_doc = f.read()
+
+        update_prompt = create_update_prompt(diff, current_doc)
+
+        updated_doc = model(
+            [
+                HumanMessage(content=update_prompt),
+            ]
+        ).content
+
+        print(file)
+        print("===")
+        # print(updated_doc)
+        print_colored_diff(current_doc, updated_doc)
+        print()
+
+        with open(repo / docs_dir / file, "w") as f:
+            current_doc = f.write(updated_doc)
 
 
 if __name__ == "__main__":
