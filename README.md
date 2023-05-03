@@ -11,8 +11,10 @@
 
 ### Install
 
+Download whl from https://github.com/Hayashi-Yudai/docs_updater/releases.
+
 ```bash
-pip install --user dist/docs_updater-0.1.0-py3-none-any.whl
+pip install --user dist/docs_updater-$VERSION-py3-none-any.whl
 ```
 
 必要な環境変数
