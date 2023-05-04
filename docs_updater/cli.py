@@ -149,14 +149,17 @@ def main(
             ]
         ).content
 
-        print(file)
-        print("===")
+        click.echo(file)
+        click.echo("===")
         # print(updated_doc)
         print_colored_diff(current_doc, updated_doc)
-        print()
+        click.echo()
 
-        with open(repo / docs_dir / file, "w") as f:
-            current_doc = f.write(updated_doc)
+        if click.confirm("Do you want to apply this update?"):
+            with open(repo / docs_dir / file, "w") as f:
+                current_doc = f.write(updated_doc)
+        else:
+            click.echo("Skipping this file.")
 
 
 if __name__ == "__main__":
