@@ -38,7 +38,7 @@ def get_git_diff(
     old_hash: str = None,
     new_hash: str = None,
 ) -> str:
-    cmd = ["git", "diff"]
+    cmd = ["git", "diff", "--", ".", "':(exclude)*.md' ':(exclude)*.rst'"]
     if old_hash:
         cmd.append(old_hash)
     if new_hash:
@@ -149,7 +149,7 @@ def main(
             ]
         ).content
 
-        click.echo(file)
+        click.echo(f"{file} (diff)")
         click.echo("===")
         # print(updated_doc)
         print_colored_diff(current_doc, updated_doc)
