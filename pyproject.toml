@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "docs-updater"
-version = "0.1.0"
+version = "0.1.1"
 description = "Update document from git diff powered by ChatGPT"
 authors = ["Yudai Hayashi <yudai0913haya@gmail.com>"]
 license = "MIT"
