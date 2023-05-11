@@ -10,7 +10,7 @@ import re
 import subprocess
 from typing import Optional
 
-from docs_updater.prompts import (
+from prompts import (
     create_context_prompt,
     create_filelist_prompt,
     create_update_prompt,
@@ -63,7 +63,7 @@ def get_current_docs(docs_dir: str) -> dict[str, str]:
 
 
 def choose_updatable_docs(
-    model, docs_dict: dict[str, str], diff: str
+    model, docs_dict: dict[str, str], diff: str, debug: bool
 ) -> dict[str, str]:
     # Create the context and filelist prompts
     context = create_context_prompt(docs_dict)
@@ -73,6 +73,11 @@ def choose_updatable_docs(
         [HumanMessage(content=context), HumanMessage(content=filelist_prompt)]
     ).content
 
+    if debug:
+        click.echo(f"context: {context}")
+        print(context)
+        click.echo(f"filelist_prompt: {filelist_prompt}")
+        click.echo(f"file_list_json_str: {file_list_json_str}")
     # FIXME
     file_list_json_str = re.findall(r"\{.*\}", file_list_json_str)[0]
 
@@ -114,11 +119,17 @@ def print_colored_diff(current_doc: str, updated_doc: str):
     default="gpt-3.5-turbo",
     help="The GPT model to use.",
 )
+@click.option(
+    "--debug",
+    default=False,
+    help="Whether to print debug information.",
+)
 def main(
     repo: Optional[str],
     docs_dir: str,
     api_type: str,
     model_name: str,
+    debug: bool,
 ) -> None:
     env_validate(api_type)
     if not repo:
@@ -137,7 +148,7 @@ def main(
     else:
         model = ChatOpenAI(temperature=0)
 
-    files = choose_updatable_docs(model, docs_dict, diff)
+    files = choose_updatable_docs(model, docs_dict, diff, debug=debug)
     click.echo(f"Files to update: {files}")
 
     # Update each file in the list
