@@ -75,7 +75,6 @@ def choose_updatable_docs(
 
     if debug:
         click.echo(f"context: {context}")
-        print(context)
         click.echo(f"filelist_prompt: {filelist_prompt}")
         click.echo(f"file_list_json_str: {file_list_json_str}")
     # FIXME
