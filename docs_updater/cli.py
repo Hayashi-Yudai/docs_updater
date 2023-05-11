@@ -6,6 +6,7 @@ from langchain.chat_models import AzureChatOpenAI, ChatOpenAI
 from langchain.schema import HumanMessage
 import os
 from pathlib import Path
+import re
 import subprocess
 from typing import Optional
 
@@ -71,6 +72,9 @@ def choose_updatable_docs(
     file_list_json_str = model(
         [HumanMessage(content=context), HumanMessage(content=filelist_prompt)]
     ).content
+
+    # FIXME
+    file_list_json_str = re.findall(r"\{.*\}", file_list_json_str)[0]
 
     return json.loads(file_list_json_str)
 
