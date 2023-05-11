@@ -5,7 +5,7 @@ def create_context_prompt(docs: dict) -> str:
     prompt = f"""
     今からあなたにはドキュメントの更新を行ってもらいます。そのためにまず、現在あるドキュメントの内容について教えます。形式はドキュメントファイル名をキー、内容をバリューに持つJSONとなっています。
 
-    {json.dumps(docs)}
+    {json.dumps(docs, ensure_ascii=False)}
     """
     return prompt
 
