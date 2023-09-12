@@ -23,6 +23,14 @@ pip install --user dist/docs_updater-$VERSION-py3-none-any.whl
 - `OPENAI_API_BASE`: APIのURL (e.g. https://$RESOURCE_NAME.openai.azure.com (azure), https://api.openai.com/v1 (openai))
 - `OPENAI_API_VERSION`: APIのバージョン (e.g. 2023-03-15-preview). GPT-4を使う場合のみ必要.
 
+### Build
+
+```
+poetry build
+```
+
+buildされたものが `dist/` 以下に格納される。
+
 ### Update documents
 
 ```bash

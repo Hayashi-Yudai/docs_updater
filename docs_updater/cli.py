@@ -10,7 +10,7 @@ import re
 import subprocess
 from typing import Optional
 
-from prompts import (
+from docs_updater.prompts import (
     create_context_prompt,
     create_filelist_prompt,
     create_update_prompt,
