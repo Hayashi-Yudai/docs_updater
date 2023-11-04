@@ -5,14 +5,15 @@ description = "Update document from git diff powered by ChatGPT"
 authors = ["Yudai Hayashi <yudai0913haya@gmail.com>"]
 license = "MIT"
 readme = "README.md"
-packages = [{include = "docs_updater"}]
+packages = [{ include = "docs_updater" }]
 
 [tool.poetry.dependencies]
-python = ">=3.9,<3.12"
+python = ">=3.11,<3.12"
 click = "^8.1.3"
-langchain = "^0.0.286"
-openai = "^0.27.6"
+langchain = "^0.0.329"
+openai = "^0.28.1"
 colored = "^1.4.4"
+loguru = "^0.7.2"
 
 [tool.poetry.scripts]
 dupdate = "docs_updater.cli:main"
