@@ -1,20 +1,24 @@
-import click
-from colored import fg, attr
 import difflib
 import json
-from langchain.chat_models import AzureChatOpenAI, ChatOpenAI
-from langchain.schema import HumanMessage
 import os
 from pathlib import Path
 import re
 import subprocess
-from typing import Optional
+
+import click
+from colored import fg, attr
+from dotenv import load_dotenv
+from langchain.chat_models import AzureChatOpenAI, ChatOpenAI
+from langchain.schema import HumanMessage
+from loguru import logger
 
 from docs_updater.prompts import (
     create_context_prompt,
     create_filelist_prompt,
     create_update_prompt,
 )
+
+load_dotenv()
 
 
 def env_validate(api_type: str):
@@ -124,7 +128,7 @@ def print_colored_diff(current_doc: str, updated_doc: str):
     help="Whether to print debug information.",
 )
 def main(
-    repo: Optional[str],
+    repo: str | None,
     docs_dir: str,
     api_type: str,
     model_name: str,
@@ -140,7 +144,7 @@ def main(
     diff = get_git_diff(repo)
     docs_dict = get_current_docs(repo / docs_dir)
 
-    click.echo(f"Ditected documents: {list(docs_dict.keys())}")
+    logger.info(f"Ditected documents: {list(docs_dict.keys())}")
 
     if api_type == "azure":
         model = AzureChatOpenAI(deployment_name=model_name, temperature=0)
@@ -148,7 +152,7 @@ def main(
         model = ChatOpenAI(temperature=0)
 
     files = choose_updatable_docs(model, docs_dict, diff, debug=debug)
-    click.echo(f"Files to update: {files}")
+    logger.info(f"Files to update: {files}")
 
     # Update each file in the list
     for file in files["files"]:
@@ -165,7 +169,6 @@ def main(
 
         click.echo(f"{file} (diff)")
         click.echo("===")
-        # print(updated_doc)
         print_colored_diff(current_doc, updated_doc)
         click.echo()
 
