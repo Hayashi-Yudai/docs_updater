@@ -111,7 +111,7 @@ def print_colored_diff(current_doc: str, updated_doc: str) -> bool:
 @click.option("--model_name", default="gpt-3.5-turbo", help="The model name to use.")
 @click.option("--k", default=1, help="The number of documents to retrieve.")
 @click.option("--debug", default=False, help="Whether to print debug information.")
-def main(repo: str, debug: bool, docs_path: str, model_name: str, k: int):
+def main(repo: str, docs_path: str, model_name: str, k: int, debug: bool):
     repo = Path(repo)
 
     r = git.Repo(repo)
