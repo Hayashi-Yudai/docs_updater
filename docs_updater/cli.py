@@ -2,89 +2,82 @@ import difflib
 import json
 import os
 from pathlib import Path
-import re
-import subprocess
 
 import click
 from colored import fg, attr
 from dotenv import load_dotenv
-from langchain.chat_models import AzureChatOpenAI, ChatOpenAI
-from langchain.schema import HumanMessage
+import git
 from loguru import logger
+import openai
 
-from docs_updater.prompts import (
-    create_context_prompt,
-    create_filelist_prompt,
-    create_update_prompt,
-)
+from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.schema import Document
+from langchain.vectorstores import Chroma
 
 load_dotenv()
+openai.api_key = os.environ.get("OPENAI_API_KEY")
 
 
-def env_validate(api_type: str):
-    if not os.environ.get("OPENAI_API_KEY"):
-        raise ValueError("OPENAI_API_KEY is not set")
-
-    if api_type == "azure":
-        if not os.environ.get("OPENAI_API_VERSION"):
-            raise ValueError("OPENAI_API_VERSION is not set")
-
-        if not os.environ.get("AZURE_RESOURCE_NAME"):
-            raise ValueError("AZURE_RESOURCE_NAME is not set")
-    if api_type not in ["openai", "azure"]:
-        raise ValueError(
-            f"API type '{api_type}' is not supported. "
-            + "Select from 'openai' or 'azure'."
-        )
-
-
-def get_git_diff(
-    repo_root: str,
-    old_hash: str = None,
-    new_hash: str = None,
-) -> str:
-    cmd = ["git", "diff", "--", ".", "':(exclude)*.md' ':(exclude)*.rst'"]
-    if old_hash:
-        cmd.append(old_hash)
-    if new_hash:
-        cmd.append(new_hash)
-
-    diff_output = subprocess.check_output(cmd, cwd=repo_root)
-    diff_str = diff_output.decode("utf-8")
-
-    return diff_str
-
-
-def get_current_docs(docs_dir: str) -> dict[str, str]:
+def get_current_docs(docs_dir: str) -> list[Document]:
     docs = os.listdir(docs_dir)
-    current_docs = {}
+    docs_contents = []
 
     for doc in docs:
         with open(f"{docs_dir}/{doc}", "r") as f:
-            current_docs[doc] = f.read()
+            docs_contents.append(
+                Document(page_content=f.read(), metadata={"title": doc})
+            )
 
-    return current_docs
+    return docs_contents
 
 
-def choose_updatable_docs(
-    model, docs_dict: dict[str, str], diff: str, debug: bool
+def create_vector_store(docs: list[Document]) -> Chroma:
+    embedding = OpenAIEmbeddings()
+    db = Chroma.from_documents(docs, embedding=embedding)
+
+    return db
+
+
+def get_updated_doc_json(
+    git_diff: str, doc: Document, model_name: str
 ) -> dict[str, str]:
-    # Create the context and filelist prompts
-    context = create_context_prompt(docs_dict)
-    filelist_prompt = create_filelist_prompt(diff)
+    functions = [
+        {
+            "name": "extract_json_from_updated_doc",
+            "description": "変更後のドキュメントをJSON形式で返します。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "doc_filename": {
+                        "type": "string",
+                        "description": "変更を行ったドキュメントのファイル名",
+                    },
+                    "doc_content": {
+                        "type": "string",
+                        "description": "変更後のドキュメントの内容",
+                    },
+                },
+            },
+        }
+    ]
+    query = (
+        "以下に示すgit diffの結果をもとに、ドキュメントで更新が必要な部分を全て探し出し更新し、その結果を返してください。"
+        + "\n\n===git diff\n"
+        + git_diff
+        + f"\n\n===古いドキュメント: {doc.metadata['title']}\n"
+        + doc.page_content
+    )
 
-    file_list_json_str = model(
-        [HumanMessage(content=context), HumanMessage(content=filelist_prompt)]
-    ).content
+    response = openai.ChatCompletion.create(
+        model=model_name,
+        temperature=0,
+        messages=[{"role": "user", "content": query}],
+        functions=functions,
+        function_call={"name": "extract_json_from_updated_doc"},
+    )
+    message = response["choices"][0]["message"]
 
-    if debug:
-        click.echo(f"context: {context}")
-        click.echo(f"filelist_prompt: {filelist_prompt}")
-        click.echo(f"file_list_json_str: {file_list_json_str}")
-    # FIXME
-    file_list_json_str = re.findall(r"\{.*\}", file_list_json_str)[0]
-
-    return json.loads(file_list_json_str)
+    return json.loads(message["function_call"]["arguments"])
 
 
 def print_colored_diff(current_doc: str, updated_doc: str):
@@ -108,75 +101,36 @@ def print_colored_diff(current_doc: str, updated_doc: str):
 @click.command()
 @click.option("--repo", default=None, help="The path to the repository.")
 @click.option(
-    "--docs-dir",
-    default="docs",
-    help="The path to documents in the repository.",
+    "--docs_path", default="docs", help="The path to documents in the repository."
 )
-@click.option(
-    "--api-type",
-    default="openai",
-    help="The API type to use. Defaults to OpenAI.",
-)
-@click.option(
-    "--model-name",
-    default="gpt-3.5-turbo",
-    help="The GPT model to use.",
-)
-@click.option(
-    "--debug",
-    default=False,
-    help="Whether to print debug information.",
-)
-def main(
-    repo: str | None,
-    docs_dir: str,
-    api_type: str,
-    model_name: str,
-    debug: bool,
-) -> None:
-    env_validate(api_type)
-    if not repo:
-        repo = os.getcwd()
-
+@click.option("--model_name", default="gpt-3.5-turbo", help="The model name to use.")
+@click.option("--debug", default=False, help="Whether to print debug information.")
+def main(repo: str, debug: bool, docs_path: str, model_name: str):
     repo = Path(repo)
-    docs_dir = Path(docs_dir)
 
-    diff = get_git_diff(repo)
-    docs_dict = get_current_docs(repo / docs_dir)
+    r = git.Repo(repo)
+    tree = r.head.commit.tree
+    git_diff = r.git.diff(tree)
+    if debug:
+        logger.debug(git_diff)
 
-    logger.info(f"Ditected documents: {list(docs_dict.keys())}")
+    logger.info(f"Using mode: {model_name}")
+    db = create_vector_store(get_current_docs(repo / docs_path))
+    logger.info(f"Created DB")
+    retriever = db.as_retriever(search_kwargs={"k": 1})
 
-    if api_type == "azure":
-        model = AzureChatOpenAI(deployment_name=model_name, temperature=0)
+    context_docs = retriever.get_relevant_documents(git_diff)
+    logger.info(f"Update the following document: {context_docs[0].metadata['title']}")
+    logger.info("Asking for ChatGPT...")
+    updated_doc = get_updated_doc_json(git_diff, context_docs[0], model_name)
+
+    print_colored_diff(context_docs[0].page_content, updated_doc["doc_content"])
+
+    if click.confirm("Do you want to apply this update?"):
+        with open(repo / docs_path / context_docs[0].metadata["title"], "w") as f:
+            f.write(updated_doc["doc_content"])
     else:
-        model = ChatOpenAI(temperature=0)
-
-    files = choose_updatable_docs(model, docs_dict, diff, debug=debug)
-    logger.info(f"Files to update: {files}")
-
-    # Update each file in the list
-    for file in files["files"]:
-        with open(repo / docs_dir / file, "r") as f:
-            current_doc = f.read()
-
-        update_prompt = create_update_prompt(diff, current_doc)
-
-        updated_doc = model(
-            [
-                HumanMessage(content=update_prompt),
-            ]
-        ).content
-
-        click.echo(f"{file} (diff)")
-        click.echo("===")
-        print_colored_diff(current_doc, updated_doc)
-        click.echo()
-
-        if click.confirm("Do you want to apply this update?"):
-            with open(repo / docs_dir / file, "w") as f:
-                current_doc = f.write(updated_doc)
-        else:
-            click.echo("Skipping this file.")
+        click.echo("Skipping this file.")
 
 
 if __name__ == "__main__":
