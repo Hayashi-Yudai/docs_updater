@@ -1,89 +1,88 @@
-import click
-from colored import fg, attr
 import difflib
 import json
-from langchain.chat_models import AzureChatOpenAI, ChatOpenAI
-from langchain.schema import HumanMessage
 import os
 from pathlib import Path
-import re
-import subprocess
-from typing import Optional
 
-from docs_updater.prompts import (
-    create_context_prompt,
-    create_filelist_prompt,
-    create_update_prompt,
-)
+import click
+from colored import fg, attr
+from dotenv import load_dotenv
+import git
+from loguru import logger
+import openai
 
+from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.schema import Document
+from langchain.vectorstores import Chroma
 
-def env_validate(api_type: str):
-    if not os.environ.get("OPENAI_API_KEY"):
-        raise ValueError("OPENAI_API_KEY is not set")
-
-    if api_type == "azure":
-        if not os.environ.get("OPENAI_API_VERSION"):
-            raise ValueError("OPENAI_API_VERSION is not set")
-
-        if not os.environ.get("AZURE_RESOURCE_NAME"):
-            raise ValueError("AZURE_RESOURCE_NAME is not set")
-    if api_type not in ["openai", "azure"]:
-        raise ValueError(
-            f"API type '{api_type}' is not supported. "
-            + "Select from 'openai' or 'azure'."
-        )
+load_dotenv()
+openai.api_key = os.environ.get("OPENAI_API_KEY")
 
 
-def get_git_diff(
-    repo_root: str,
-    old_hash: str = None,
-    new_hash: str = None,
-) -> str:
-    cmd = ["git", "diff", "--", ".", "':(exclude)*.md' ':(exclude)*.rst'"]
-    if old_hash:
-        cmd.append(old_hash)
-    if new_hash:
-        cmd.append(new_hash)
-
-    diff_output = subprocess.check_output(cmd, cwd=repo_root)
-    diff_str = diff_output.decode("utf-8")
-
-    return diff_str
-
-
-def get_current_docs(docs_dir: str) -> dict[str, str]:
+def get_current_docs(docs_dir: str) -> list[Document]:
     docs = os.listdir(docs_dir)
-    current_docs = {}
+    docs_contents = []
 
     for doc in docs:
         with open(f"{docs_dir}/{doc}", "r") as f:
-            current_docs[doc] = f.read()
+            docs_contents.append(
+                Document(page_content=f.read(), metadata={"title": doc})
+            )
 
-    return current_docs
+    return docs_contents
 
 
-def choose_updatable_docs(
-    model, docs_dict: dict[str, str], diff: str, debug: bool
+def create_vector_store(docs: list[Document]) -> Chroma:
+    embedding = OpenAIEmbeddings()
+    db = Chroma.from_documents(docs, embedding=embedding)
+
+    return db
+
+
+def get_updated_doc_json(
+    git_diff: str, doc: Document, model_name: str
 ) -> dict[str, str]:
-    # Create the context and filelist prompts
-    context = create_context_prompt(docs_dict)
-    filelist_prompt = create_filelist_prompt(diff)
+    functions = [
+        {
+            "name": "extract_json_from_updated_doc",
+            "description": "変更後のドキュメントをJSON形式で返します。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "doc_filename": {
+                        "type": "string",
+                        "description": "変更を行ったドキュメントのファイル名",
+                    },
+                    "doc_content": {
+                        "type": "string",
+                        "description": "変更後のドキュメントの内容",
+                    },
+                },
+            },
+        }
+    ]
+    query = (
+        "以下に示すgit diffの結果をもとに、ドキュメントで更新が必要な部分がある場合には全て探し出し更新し、その結果を返してください。"
+        + "\n\n===git diff\n"
+        + git_diff
+        + f"\n\n===古いドキュメント: {doc.metadata['title']}\n"
+        + doc.page_content
+    )
 
-    file_list_json_str = model(
-        [HumanMessage(content=context), HumanMessage(content=filelist_prompt)]
-    ).content
+    response = openai.ChatCompletion.create(
+        model=model_name,
+        temperature=0,
+        messages=[{"role": "user", "content": query}],
+        functions=functions,
+        function_call={"name": "extract_json_from_updated_doc"},
+    )
+    message = response["choices"][0]["message"]
 
-    if debug:
-        click.echo(f"context: {context}")
-        click.echo(f"filelist_prompt: {filelist_prompt}")
-        click.echo(f"file_list_json_str: {file_list_json_str}")
-    # FIXME
-    file_list_json_str = re.findall(r"\{.*\}", file_list_json_str)[0]
-
-    return json.loads(file_list_json_str)
+    return json.loads(message["function_call"]["arguments"])
 
 
-def print_colored_diff(current_doc: str, updated_doc: str):
+def print_colored_diff(current_doc: str, updated_doc: str) -> bool:
+    has_change = False
+
     diff = difflib.unified_diff(
         current_doc.splitlines(),
         updated_doc.splitlines(),
@@ -93,6 +92,7 @@ def print_colored_diff(current_doc: str, updated_doc: str):
     )
 
     for line in diff:
+        has_change = True
         if line.startswith("+"):
             print(f"{fg(2)}{line}{attr(0)}")
         elif line.startswith("-"):
@@ -100,80 +100,51 @@ def print_colored_diff(current_doc: str, updated_doc: str):
         else:
             print(line)
 
+    return has_change
+
 
 @click.command()
 @click.option("--repo", default=None, help="The path to the repository.")
 @click.option(
-    "--docs-dir",
-    default="docs",
-    help="The path to documents in the repository.",
+    "--docs_path", default="docs", help="The path to documents in the repository."
 )
-@click.option(
-    "--api-type",
-    default="openai",
-    help="The API type to use. Defaults to OpenAI.",
-)
-@click.option(
-    "--model-name",
-    default="gpt-3.5-turbo",
-    help="The GPT model to use.",
-)
-@click.option(
-    "--debug",
-    default=False,
-    help="Whether to print debug information.",
-)
-def main(
-    repo: Optional[str],
-    docs_dir: str,
-    api_type: str,
-    model_name: str,
-    debug: bool,
-) -> None:
-    env_validate(api_type)
-    if not repo:
-        repo = os.getcwd()
-
+@click.option("--model_name", default="gpt-3.5-turbo", help="The model name to use.")
+@click.option("--k", default=1, help="The number of documents to retrieve.")
+@click.option("--debug", default=False, help="Whether to print debug information.")
+def main(repo: str, docs_path: str, model_name: str, k: int, debug: bool):
     repo = Path(repo)
-    docs_dir = Path(docs_dir)
 
-    diff = get_git_diff(repo)
-    docs_dict = get_current_docs(repo / docs_dir)
+    r = git.Repo(repo)
+    tree = r.head.commit.tree
+    git_diff = r.git.diff(tree)
+    if debug:
+        logger.debug(git_diff)
 
-    click.echo(f"Ditected documents: {list(docs_dict.keys())}")
+    logger.info(f"Using mode: {model_name}")
+    db = create_vector_store(get_current_docs(repo / docs_path))
+    logger.info(f"Created DB")
+    retriever = db.as_retriever(search_kwargs={"k": k})
 
-    if api_type == "azure":
-        model = AzureChatOpenAI(deployment_name=model_name, temperature=0)
-    else:
-        model = ChatOpenAI(temperature=0)
+    for i in range(k):
+        context_docs = retriever.get_relevant_documents(git_diff)
+        logger.info(
+            f"Update the following document: {context_docs[i].metadata['title']}"
+        )
+        logger.info("Asking to ChatGPT...")
+        updated_doc = get_updated_doc_json(git_diff, context_docs[i], model_name)
 
-    files = choose_updatable_docs(model, docs_dict, diff, debug=debug)
-    click.echo(f"Files to update: {files}")
+        has_change = print_colored_diff(
+            context_docs[i].page_content, updated_doc["doc_content"]
+        )
 
-    # Update each file in the list
-    for file in files["files"]:
-        with open(repo / docs_dir / file, "r") as f:
-            current_doc = f.read()
-
-        update_prompt = create_update_prompt(diff, current_doc)
-
-        updated_doc = model(
-            [
-                HumanMessage(content=update_prompt),
-            ]
-        ).content
-
-        click.echo(f"{file} (diff)")
-        click.echo("===")
-        # print(updated_doc)
-        print_colored_diff(current_doc, updated_doc)
-        click.echo()
-
-        if click.confirm("Do you want to apply this update?"):
-            with open(repo / docs_dir / file, "w") as f:
-                current_doc = f.write(updated_doc)
+        if has_change and click.confirm("Do you want to apply this update?"):
+            with open(repo / docs_path / context_docs[0].metadata["title"], "w") as f:
+                f.write(updated_doc["doc_content"])
         else:
-            click.echo("Skipping this file.")
+            if not has_change:
+                click.echo(f"No changes found in {context_docs[i].metadata['title']}.")
+            else:
+                click.echo("Skipping this file.")
 
 
 if __name__ == "__main__":
