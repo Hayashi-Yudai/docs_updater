@@ -10,8 +10,6 @@ import git
 from loguru import logger
 import openai
 
-from langchain.chains import RetrievalQA, create_extraction_chain
-from langchain.chat_models import ChatOpenAI
 from langchain.embeddings.openai import OpenAIEmbeddings
 from langchain.schema import Document
 from langchain.vectorstores import Chroma
@@ -111,8 +109,9 @@ def print_colored_diff(current_doc: str, updated_doc: str) -> bool:
     "--docs_path", default="docs", help="The path to documents in the repository."
 )
 @click.option("--model_name", default="gpt-3.5-turbo", help="The model name to use.")
+@click.option("--k", default=1, help="The number of documents to retrieve.")
 @click.option("--debug", default=False, help="Whether to print debug information.")
-def main(repo: str, debug: bool, docs_path: str, model_name: str):
+def main(repo: str, debug: bool, docs_path: str, model_name: str, k: int):
     repo = Path(repo)
 
     r = git.Repo(repo)
@@ -124,36 +123,28 @@ def main(repo: str, debug: bool, docs_path: str, model_name: str):
     logger.info(f"Using mode: {model_name}")
     db = create_vector_store(get_current_docs(repo / docs_path))
     logger.info(f"Created DB")
-    retriever = db.as_retriever(search_kwargs={"k": 2})
-    llm = ChatOpenAI(model_name=model_name, temperature=0.0)
+    retriever = db.as_retriever(search_kwargs={"k": k})
 
-    qa = RetrievalQA.from_chain_type(llm=llm, chain_type="stuff", retriever=retriever)
-    res = qa.run(
-        f"以下のコードの差分によって変更が必要なドキュメント(.md, .rst)のファイル名を全て出力してください。\n\n==\n{git_diff}"
-    )
+    for i in range(k):
+        context_docs = retriever.get_relevant_documents(git_diff)
+        logger.info(
+            f"Update the following document: {context_docs[i].metadata['title']}"
+        )
+        logger.info("Asking to ChatGPT...")
+        updated_doc = get_updated_doc_json(git_diff, context_docs[i], model_name)
 
-    print(res)
-    schema = {"properties": {"files": {"type": "array", "items": {"type": "string"}}}}
-    chain = create_extraction_chain(schema, llm)
-    print(chain.run(res))
+        has_change = print_colored_diff(
+            context_docs[i].page_content, updated_doc["doc_content"]
+        )
 
-    # context_docs = retriever.get_relevant_documents(git_diff)
-    # logger.info(f"Update the following document: {context_docs[1].metadata['title']}")
-    # logger.info("Asking to ChatGPT...")
-    # updated_doc = get_updated_doc_json(git_diff, context_docs[1], model_name)
-
-    # has_change = print_colored_diff(
-    #     context_docs[1].page_content, updated_doc["doc_content"]
-    # )
-
-    # if has_change and click.confirm("Do you want to apply this update?"):
-    #     with open(repo / docs_path / context_docs[1].metadata["title"], "w") as f:
-    #         f.write(updated_doc["doc_content"])
-    # else:
-    #     if not has_change:
-    #         click.echo(f"No changes found in {context_docs[1].metadata['title']}.")
-    #     else:
-    #         click.echo("Skipping this file.")
+        if has_change and click.confirm("Do you want to apply this update?"):
+            with open(repo / docs_path / context_docs[0].metadata["title"], "w") as f:
+                f.write(updated_doc["doc_content"])
+        else:
+            if not has_change:
+                click.echo(f"No changes found in {context_docs[i].metadata['title']}.")
+            else:
+                click.echo("Skipping this file.")
 
 
 if __name__ == "__main__":
