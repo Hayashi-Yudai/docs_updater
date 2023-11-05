@@ -61,7 +61,7 @@ def get_updated_doc_json(
         }
     ]
     query = (
-        "以下に示すgit diffの結果をもとに、ドキュメントで更新が必要な部分を全て探し出し更新し、その結果を返してください。"
+        "以下に示すgit diffの結果をもとに、ドキュメントで更新が必要な部分がある場合には全て探し出し更新し、その結果を返してください。"
         + "\n\n===git diff\n"
         + git_diff
         + f"\n\n===古いドキュメント: {doc.metadata['title']}\n"
@@ -80,7 +80,9 @@ def get_updated_doc_json(
     return json.loads(message["function_call"]["arguments"])
 
 
-def print_colored_diff(current_doc: str, updated_doc: str):
+def print_colored_diff(current_doc: str, updated_doc: str) -> bool:
+    has_change = False
+
     diff = difflib.unified_diff(
         current_doc.splitlines(),
         updated_doc.splitlines(),
@@ -90,12 +92,15 @@ def print_colored_diff(current_doc: str, updated_doc: str):
     )
 
     for line in diff:
+        has_change = True
         if line.startswith("+"):
             print(f"{fg(2)}{line}{attr(0)}")
         elif line.startswith("-"):
             print(f"{fg(1)}{line}{attr(0)}")
         else:
             print(line)
+
+    return has_change
 
 
 @click.command()
@@ -117,20 +122,25 @@ def main(repo: str, debug: bool, docs_path: str, model_name: str):
     logger.info(f"Using mode: {model_name}")
     db = create_vector_store(get_current_docs(repo / docs_path))
     logger.info(f"Created DB")
-    retriever = db.as_retriever(search_kwargs={"k": 1})
+    retriever = db.as_retriever(search_kwargs={"k": 2})
 
     context_docs = retriever.get_relevant_documents(git_diff)
-    logger.info(f"Update the following document: {context_docs[0].metadata['title']}")
-    logger.info("Asking for ChatGPT...")
-    updated_doc = get_updated_doc_json(git_diff, context_docs[0], model_name)
+    logger.info(f"Update the following document: {context_docs[1].metadata['title']}")
+    logger.info("Asking to ChatGPT...")
+    updated_doc = get_updated_doc_json(git_diff, context_docs[1], model_name)
 
-    print_colored_diff(context_docs[0].page_content, updated_doc["doc_content"])
+    has_change = print_colored_diff(
+        context_docs[1].page_content, updated_doc["doc_content"]
+    )
 
-    if click.confirm("Do you want to apply this update?"):
-        with open(repo / docs_path / context_docs[0].metadata["title"], "w") as f:
+    if has_change and click.confirm("Do you want to apply this update?"):
+        with open(repo / docs_path / context_docs[1].metadata["title"], "w") as f:
             f.write(updated_doc["doc_content"])
     else:
-        click.echo("Skipping this file.")
+        if not has_change:
+            click.echo(f"No changes found in {context_docs[1].metadata['title']}.")
+        else:
+            click.echo("Skipping this file.")
 
 
 if __name__ == "__main__":
